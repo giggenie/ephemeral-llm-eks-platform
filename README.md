@@ -56,6 +56,7 @@ self-hosted runner inside the VPC.
 5. Review the Terraform plan for the ephemeral session.
 6. Run **Start EKS session** with a lowercase session ID and an expiry no more
    than eight hours in the future.
+   The session creates the ECR interface endpoints needed by its private nodes.
 7. Run **Warm EKS session** to bootstrap Argo CD and activate the model.
 8. Run **Verify EKS session** for the bounded validation task.
 9. Run **Destroy EKS session** with `DESTROY-<session_id>`.
@@ -63,8 +64,10 @@ self-hosted runner inside the VPC.
 
 Run **EKS session pipeline** manually when infrastructure is needed. It runs
 ordered plan, apply, warm-up, and verification jobs, then leaves the session
-running. Run **Destroy EKS session** separately when finished; configure required
-reviewers on both `apply` and `destroy`.
+running. Run **Destroy EKS session** separately when finished; it removes the
+EKS cluster, NAT gateway, load balancers, and session-scoped ECR interface
+endpoints while retaining the persistent ECR repository and images. Configure
+required reviewers on both `apply` and `destroy`.
 
 The destroy workflow is protected and targets only the session state key. It
 must never be used against the foundation state.

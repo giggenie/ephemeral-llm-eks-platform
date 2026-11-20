@@ -94,15 +94,6 @@ jobs:
           if ! terraform state list | grep -Fxq 'aws_subnet.public[1]'; then
             terraform import 'aws_subnet.public[1]' "$public_one"
           fi
-          for endpoint in ecr_api ecr_dkr; do
-            service="com.amazonaws.${AWS_REGION}.${endpoint//_/.}"
-            endpoint_id="$(aws ec2 describe-vpc-endpoints \
-              --filters "Name=vpc-id,Values=${vpc_id}" "Name=service-name,Values=${service}" \
-              --query 'VpcEndpoints[0].VpcEndpointId' --output text)"
-            if ! terraform state list | grep -Fxq "aws_vpc_endpoint.${endpoint}"; then
-              terraform import "aws_vpc_endpoint.${endpoint}" "$endpoint_id"
-            fi
-          done
       - name: Terraform plan
         working-directory: infra/foundation
         env:
@@ -145,6 +136,7 @@ jobs:
         env:
           TF_VAR_aws_region: ${{ vars.AWS_REGION }}
           TF_VAR_project_name: ${{ vars.PROJECT_NAME }}
-          TF_VAR_github_repository: ${{ github.repository }}
+          TF_VAR_github_repository: repo:${{ github.repository_owner }}@${{ github.repository_owner_id }}/${{ github.event.repository.name }}@${{ github.repository_id }}
           TF_VAR_budget_limit_usd: ${{ vars.BUDGET_LIMIT_USD }}
+          TF_VAR_budget_alert_email: ${{ vars.BUDGET_ALERT_EMAIL }}
         run: terraform apply -input=false tfplan
