@@ -44,7 +44,7 @@ jobs:
         env:
           TF_VAR_aws_region: ${{ vars.AWS_REGION }}
           TF_VAR_project_name: ${{ vars.PROJECT_NAME }}
-          TF_VAR_github_repository: repo:${{ github.repository_owner }}@${{ github.repository_owner_id }}/${{ github.event.repository.name }}@${{ github.repository_id }}
+          TF_VAR_github_repository: ${{ github.repository_owner }}@${{ github.repository_owner_id }}/${{ github.event.repository.name }}@${{ github.repository_id }}
           TF_VAR_foundation_state_bucket: ${{ vars.FOUNDATION_STATE_BUCKET }}
           TF_VAR_session_id: "plan-${{ github.run_id }}"
           TF_VAR_expires_at: "2099-01-01T00:00:00Z"

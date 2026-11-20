@@ -18,6 +18,10 @@ output "private_route_table_id" {
   value = aws_route_table.private.id
 }
 
+output "s3_vpc_endpoint_id" {
+  value = aws_vpc_endpoint.s3.id
+}
+
 output "artifacts_bucket" {
   value = aws_s3_bucket.artifacts.bucket
 }
