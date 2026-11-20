@@ -1,0 +1,51 @@
+session:
+  namespace: llm-session
+  expiresAt: ""
+
+image:
+  repository: ""
+  tag: ""
+  pullPolicy: IfNotPresent
+
+model:
+  enabled: true
+  replicas: 0
+  image: vllm/vllm-openai:v0.6.4
+  name: ""
+  artifactUri: ""
+  sha256: ""
+  maxModelLen: 8192
+  gpu:
+    instanceTypes:
+      - g4dn.xlarge
+    memory: 1
+
+gateway:
+  replicas: 1
+  image: nginx:1.27-alpine
+  servicePort: 8080
+  authSecretName: llm-session-auth
+
+ingress:
+  enabled: true
+  hostname: ""
+  certificateArn: ""
+
+resources:
+  gateway:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  model:
+    requests:
+      cpu: "2"
+      memory: 8Gi
+    limits:
+      cpu: "4"
+      memory: 16Gi
+
+metrics:
+  enabled: true

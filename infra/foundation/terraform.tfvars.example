@@ -1,0 +1,4 @@
+aws_region       = "us-east-1"
+project_name     = "llm-sessions"
+github_repository = "OWNER/ephemeral-llm-eks-platform"
+budget_limit_usd = 100

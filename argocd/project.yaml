@@ -1,0 +1,14 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: llm-session
+  namespace: argocd
+spec:
+  sourceRepos:
+    - https://github.com/OWNER/ephemeral-llm-eks-platform.git
+  destinations:
+    - namespace: llm-session
+      server: https://kubernetes.default.svc
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace

@@ -1,0 +1,24 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: llm-session
+  namespace: argocd
+spec:
+  project: llm-session
+  source:
+    repoURL: https://github.com/OWNER/ephemeral-llm-eks-platform.git
+    targetRevision: main
+    path: charts/session
+    helm:
+      values: |
+        session:
+          namespace: llm-session
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: llm-session
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

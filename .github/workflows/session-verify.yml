@@ -1,0 +1,36 @@
+name: Verify EKS session
+
+on:
+  workflow_dispatch:
+    inputs:
+      session_id:
+        description: "Existing session identifier"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    environment: apply
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ vars.AWS_REGION }}
+          role-to-assume: ${{ vars.AWS_APPLY_ROLE_ARN }}
+      - name: Configure cluster access
+        run: aws eks update-kubeconfig --region "${{ vars.AWS_REGION }}" --name "${{ vars.PROJECT_NAME }}-${{ inputs.session_id }}"
+      - name: Verify cluster and workloads
+        run: |
+          kubectl get nodes
+          kubectl -n argocd get applications
+          kubectl -n llm-session get deployments,pods
+      - name: Upload verification metric
+        run: |
+          aws cloudwatch put-metric-data \
+            --namespace "${{ vars.PROJECT_NAME }}" \
+            --metric-data "MetricName=SessionVerified,Value=1,Unit=Count"

@@ -1,0 +1,75 @@
+name: Start EKS session
+
+on:
+  workflow_dispatch:
+    inputs:
+      session_id:
+        description: "Lowercase session identifier"
+        required: true
+        type: string
+      expires_at:
+        description: "UTC expiration timestamp, no more than 8 hours from start"
+        required: true
+        type: string
+      model_name:
+        description: "Exact model identifier"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: llm-session-apply
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    environment: apply
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ vars.AWS_REGION }}
+          role-to-assume: ${{ vars.AWS_APPLY_ROLE_ARN }}
+      - name: Validate session expiry
+        env:
+          EXPIRES_AT: ${{ inputs.expires_at }}
+        run: |
+          python - <<'PY'
+          import datetime
+          import os
+          expiry = datetime.datetime.fromisoformat(os.environ["EXPIRES_AT"].replace("Z", "+00:00"))
+          now = datetime.datetime.now(datetime.timezone.utc)
+          if expiry <= now or expiry > now + datetime.timedelta(hours=8):
+              raise SystemExit("expires_at must be in the future and no more than 8 hours away")
+          PY
+      - name: Terraform init
+        working-directory: infra/session
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ vars.FOUNDATION_STATE_BUCKET }}" \
+            -backend-config="key=sessions/${{ inputs.session_id }}/terraform.tfstate" \
+            -backend-config="region=${{ vars.AWS_REGION }}"
+      - name: Terraform apply
+        working-directory: infra/session
+        env:
+          TF_VAR_aws_region: ${{ vars.AWS_REGION }}
+          TF_VAR_project_name: ${{ vars.PROJECT_NAME }}
+          TF_VAR_session_id: ${{ inputs.session_id }}
+          TF_VAR_expires_at: ${{ inputs.expires_at }}
+          TF_VAR_foundation_state_bucket: ${{ vars.FOUNDATION_STATE_BUCKET }}
+          TF_VAR_foundation_state_key: foundation/terraform.tfstate
+          TF_VAR_eks_public_access_cidrs: ${{ vars.EKS_PUBLIC_ACCESS_CIDRS }}
+        run: terraform apply -auto-approve -input=false
+      - name: Write session summary
+        run: |
+          {
+            echo "## Session started"
+            echo "- Session: \`${{ inputs.session_id }}\`"
+            echo "- Expires: \`${{ inputs.expires_at }}\`"
+            echo "- Warm up: run the **Session warm-up** workflow with this session ID."
+          } >> "$GITHUB_STEP_SUMMARY"

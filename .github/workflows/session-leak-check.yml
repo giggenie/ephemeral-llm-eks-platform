@@ -1,0 +1,32 @@
+name: Check EKS session leaks
+
+on:
+  workflow_dispatch:
+    inputs:
+      session_id:
+        description: "Session identifier to inspect"
+        required: true
+        type: string
+
+permissions:
+  id-token: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    environment: destroy
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ vars.AWS_REGION }}
+          role-to-assume: ${{ vars.AWS_DESTROY_ROLE_ARN }}
+      - name: Check tagged resources
+        env:
+          SESSION_ID: ${{ inputs.session_id }}
+        run: |
+          resources="$(aws resourcegroupstaggingapi get-resources --tag-filters Key=SessionId,Values="$SESSION_ID" --query 'ResourceTagMappingList[].ResourceARN' --output text)"
+          if [ -n "$resources" ]; then
+            echo "$resources"
+            exit 1
+          fi
+          echo "No tagged session resources remain."

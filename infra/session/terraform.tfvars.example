@@ -1,0 +1,6 @@
+aws_region            = "us-east-1"
+project_name          = "llm-sessions"
+session_id            = "local-example"
+expires_at            = "2099-01-01T00:00:00Z"
+foundation_state_bucket = "replace-with-foundation-state-bucket"
+eks_public_access_cidrs = ["203.0.113.0/24"]

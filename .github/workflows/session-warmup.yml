@@ -1,0 +1,42 @@
+name: Warm EKS session
+
+on:
+  workflow_dispatch:
+    inputs:
+      session_id:
+        description: "Existing session identifier"
+        required: true
+        type: string
+      model_name:
+        description: "Exact model identifier"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  warm:
+    runs-on: ubuntu-latest
+    environment: apply
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ vars.AWS_REGION }}
+          role-to-assume: ${{ vars.AWS_APPLY_ROLE_ARN }}
+      - name: Install tools
+        uses: azure/setup-helm@v4
+      - name: Configure cluster access
+        run: aws eks update-kubeconfig --region "${{ vars.AWS_REGION }}" --name "${{ vars.PROJECT_NAME }}-${{ inputs.session_id }}"
+      - name: Wait for Argo CD
+        run: kubectl -n argocd rollout status deployment/argocd-server --timeout=10m
+      - name: Apply Argo application
+        run: kubectl apply -f argocd/project.yaml -f argocd/application.yaml
+      - name: Scale model for warm-up
+        run: |
+          kubectl -n llm-session scale deployment/llm-session-llm-session-model --replicas=1
+          kubectl -n llm-session rollout status deployment/llm-session-llm-session-model --timeout=20m
+      - name: Verify model service
+        run: kubectl -n llm-session get pods,svc -o wide

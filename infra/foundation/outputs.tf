@@ -1,0 +1,35 @@
+output "vpc_id" {
+  value = aws_vpc.main.id
+}
+
+output "public_subnet_ids" {
+  value = aws_subnet.public[*].id
+}
+
+output "private_subnet_ids" {
+  value = aws_subnet.private[*].id
+}
+
+output "private_route_table_id" {
+  value = aws_route_table.private.id
+}
+
+output "artifacts_bucket" {
+  value = aws_s3_bucket.artifacts.bucket
+}
+
+output "ecr_repository_url" {
+  value = aws_ecr_repository.session.repository_url
+}
+
+output "github_plan_role_arn" {
+  value = aws_iam_role.github_terraform["plan"].arn
+}
+
+output "github_apply_role_arn" {
+  value = aws_iam_role.github_terraform["apply"].arn
+}
+
+output "github_destroy_role_arn" {
+  value = aws_iam_role.github_terraform["destroy"].arn
+}
