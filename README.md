@@ -1,7 +1,9 @@
-# Ephemeral EKS LLM Sessions
+# ephemeral-llm-eks-platform
 
-This repository defines a disposable AWS EKS environment for a self-hosted LLM
-coding agent. Read `docs\architecture.md` before changing the implementation.
+Cost-controlled, self-hosted LLM coding infrastructure on ephemeral AWS EKS
+clusters, managed with Terraform, Argo CD, and GitHub Actions.
+
+Read `docs\architecture.md` before changing the implementation.
 
 ## Required configuration
 
