@@ -26,7 +26,7 @@ jobs:
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-region: ${{ vars.AWS_REGION }}
-          role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
+          role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN || vars.AWS_BOOTSTRAP_ROLE_ARN }}
       - name: Terraform init
         working-directory: infra/${{ matrix.root }}
         run: |
@@ -49,6 +49,9 @@ jobs:
           TF_VAR_session_id: "plan-${{ github.run_id }}"
           TF_VAR_expires_at: "2099-01-01T00:00:00Z"
           TF_VAR_eks_public_access_cidrs: ${{ vars.EKS_PUBLIC_ACCESS_CIDRS }}
+          TF_VAR_model_artifact_bucket: ${{ vars.MODEL_ARTIFACT_BUCKET }}
+          TF_VAR_model_artifact_key: ${{ vars.MODEL_ARTIFACT_KEY }}
+          TF_VAR_model_artifact_sha256: ${{ vars.MODEL_ARTIFACT_SHA256 }}
         run: |
           terraform plan -input=false -out=tfplan
       - uses: actions/upload-artifact@v4
