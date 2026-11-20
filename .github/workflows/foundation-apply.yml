@@ -100,6 +100,7 @@ jobs:
           TF_VAR_project_name: ${{ vars.PROJECT_NAME }}
           TF_VAR_github_repository: repo:${{ github.repository_owner }}@${{ github.repository_owner_id }}/${{ github.event.repository.name }}@${{ github.repository_id }}
           TF_VAR_budget_limit_usd: ${{ vars.BUDGET_LIMIT_USD }}
+          TF_VAR_budget_alert_email: ${{ vars.BUDGET_ALERT_EMAIL }}
         run: terraform plan -input=false -out tfplan
       - uses: actions/upload-artifact@v4
         with:
@@ -136,4 +137,5 @@ jobs:
           TF_VAR_project_name: ${{ vars.PROJECT_NAME }}
           TF_VAR_github_repository: repo:${{ github.repository_owner }}@${{ github.repository_owner_id }}/${{ github.event.repository.name }}@${{ github.repository_id }}
           TF_VAR_budget_limit_usd: ${{ vars.BUDGET_LIMIT_USD }}
+          TF_VAR_budget_alert_email: ${{ vars.BUDGET_ALERT_EMAIL }}
         run: terraform apply -input=false tfplan
