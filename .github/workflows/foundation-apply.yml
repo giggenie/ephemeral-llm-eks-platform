@@ -102,12 +102,12 @@ jobs:
             for service in ecr.api ecr.dkr; do
               endpoint_ids="$(aws ec2 describe-vpc-endpoints \
                 --filters "Name=vpc-id,Values=${vpc_id}" "Name=service-name,Values=com.amazonaws.${AWS_REGION}.${service}" \
-                --query 'VpcEndpoints[].VpcEndpointId' --output text)"
+                --query 'VpcEndpoints[?State==`available` || State==`pending`].VpcEndpointId' --output text)"
               if [[ -n "$endpoint_ids" && "$endpoint_ids" != "None" ]]; then
                 for endpoint_id in $endpoint_ids; do
                   aws ec2 delete-vpc-endpoints --vpc-endpoint-ids "$endpoint_id"
                 done
-                for attempt in {1..30}; do
+                for attempt in {1..120}; do
                   remaining="$(aws ec2 describe-vpc-endpoints \
                     --filters "Name=vpc-id,Values=${vpc_id}" "Name=service-name,Values=com.amazonaws.${AWS_REGION}.${service}" \
                     --query 'VpcEndpoints[?State!=`deleted`].VpcEndpointId' --output text)"
