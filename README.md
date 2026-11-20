@@ -18,6 +18,7 @@ foundation run. Configure these GitHub repository or environment variables:
 - `AWS_DESTROY_ROLE_ARN`
 - `AWS_BOOTSTRAP_ROLE_ARN` (pre-existing GitHub OIDC role used only to bootstrap the foundation)
 - `BUDGET_LIMIT_USD`
+- `BUDGET_ALERT_EMAIL` (optional; required to enable forecast notifications)
 - `EKS_PUBLIC_ACCESS_CIDRS` (a restricted JSON list; never `0.0.0.0/0`)
 - `MODEL_ARTIFACT_BUCKET`
 - `MODEL_ARTIFACT_KEY`
@@ -29,9 +30,9 @@ Add the `GATEWAY_HTPASSWD` value as a masked `apply` environment secret. It
 must contain an nginx `htpasswd` line, for example generated with
 `htpasswd -nbB operator '<password>'`.
 
-The GitHub repository value passed to `infra\foundation` must match the exact
-`OWNER/ephemeral-llm-eks-platform` used by the OIDC trust policy. The intended
-repository name is `ephemeral-llm-eks-platform`.
+The GitHub repository value passed to `infra\foundation` must match the
+repository-ID subject used by the OIDC trust policy:
+`OWNER@OWNER_ID/ephemeral-llm-eks-platform@REPOSITORY_ID`.
 
 The model image, exact model identifier, and GPU instance allowlist must be
 selected before an AWS session is started. Do not commit credentials, model
@@ -55,6 +56,7 @@ self-hosted runner inside the VPC.
 5. Review the Terraform plan for the ephemeral session.
 6. Run **Start EKS session** with a lowercase session ID and an expiry no more
    than eight hours in the future.
+   The session creates the ECR interface endpoints needed by its private nodes.
 7. Run **Warm EKS session** to bootstrap Argo CD and activate the model.
 8. Run **Verify EKS session** for the bounded validation task.
 9. Run **Destroy EKS session** with `DESTROY-<session_id>`.
@@ -62,8 +64,10 @@ self-hosted runner inside the VPC.
 
 Run **EKS session pipeline** manually when infrastructure is needed. It runs
 ordered plan, apply, warm-up, and verification jobs, then leaves the session
-running. Run **Destroy EKS session** separately when finished; configure required
-reviewers on both `apply` and `destroy`.
+running. Run **Destroy EKS session** separately when finished; it removes the
+EKS cluster, NAT gateway, load balancers, and session-scoped ECR interface
+endpoints while retaining the persistent ECR repository and images. Configure
+required reviewers on both `apply` and `destroy`.
 
 The destroy workflow is protected and targets only the session state key. It
 must never be used against the foundation state.

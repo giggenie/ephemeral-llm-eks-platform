@@ -75,44 +75,6 @@ resource "aws_vpc_endpoint" "s3" {
   route_table_ids   = [aws_route_table.private.id]
 }
 
-resource "aws_vpc_endpoint" "ecr_api" {
-  vpc_id              = aws_vpc.main.id
-  service_name        = "com.amazonaws.${var.aws_region}.ecr.api"
-  vpc_endpoint_type   = "Interface"
-  subnet_ids          = aws_subnet.private[*].id
-  security_group_ids  = [aws_security_group.endpoint.id]
-  private_dns_enabled = true
-}
-
-resource "aws_vpc_endpoint" "ecr_dkr" {
-  vpc_id              = aws_vpc.main.id
-  service_name        = "com.amazonaws.${var.aws_region}.ecr.dkr"
-  vpc_endpoint_type   = "Interface"
-  subnet_ids          = aws_subnet.private[*].id
-  security_group_ids  = [aws_security_group.endpoint.id]
-  private_dns_enabled = true
-}
-
-resource "aws_security_group" "endpoint" {
-  name        = "${var.project_name}-endpoints"
-  description = "Private endpoint access from session subnets."
-  vpc_id      = aws_vpc.main.id
-
-  ingress {
-    protocol    = "tcp"
-    from_port   = 443
-    to_port     = 443
-    cidr_blocks = [var.vpc_cidr]
-  }
-
-  egress {
-    protocol    = "-1"
-    from_port   = 0
-    to_port     = 0
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-}
-
 resource "aws_s3_bucket" "artifacts" {
   bucket = "${var.project_name}-${data.aws_caller_identity.current.account_id}-${var.aws_region}"
 }
@@ -170,19 +132,17 @@ resource "aws_ecr_lifecycle_policy" "session" {
   })
 }
 
-resource "aws_iam_openid_connect_provider" "github" {
-  url             = "https://token.actions.githubusercontent.com"
-  client_id_list  = ["sts.amazonaws.com"]
-  thumbprint_list = [data.tls_certificate.github_actions.certificates[0].sha1_fingerprint]
+data "aws_iam_openid_connect_provider" "github" {
+  url = "https://token.actions.githubusercontent.com"
 }
 
-data "aws_iam_policy_document" "github_assume" {
+data "aws_iam_policy_document" "github_assume_environment" {
   statement {
     actions = ["sts:AssumeRoleWithWebIdentity"]
 
     principals {
       type        = "Federated"
-      identifiers = [aws_iam_openid_connect_provider.github.arn]
+      identifiers = [data.aws_iam_openid_connect_provider.github.arn]
     }
 
     condition {
@@ -199,11 +159,38 @@ data "aws_iam_policy_document" "github_assume" {
   }
 }
 
+data "aws_iam_policy_document" "github_assume_plan" {
+  statement {
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+
+    principals {
+      type        = "Federated"
+      identifiers = [data.aws_iam_openid_connect_provider.github.arn]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringLike"
+      variable = "token.actions.githubusercontent.com:sub"
+      values = [
+        "repo:${var.github_repository}:environment:*",
+        "repo:${var.github_repository}:ref:refs/heads/*",
+        "repo:${var.github_repository}:pull_request"
+      ]
+    }
+  }
+}
+
 resource "aws_iam_role" "github_terraform" {
   for_each = toset(["plan", "apply", "destroy"])
 
   name               = "${var.project_name}-github-${each.key}"
-  assume_role_policy = data.aws_iam_policy_document.github_assume.json
+  assume_role_policy = each.key == "plan" ? data.aws_iam_policy_document.github_assume_plan.json : data.aws_iam_policy_document.github_assume_environment.json
 }
 
 resource "aws_iam_role_policy" "github_terraform" {
@@ -249,11 +236,15 @@ resource "aws_budgets_budget" "monthly" {
   limit_unit   = "USD"
   time_unit    = "MONTHLY"
 
-  notification {
-    comparison_operator        = "GREATER_THAN"
-    threshold                  = 80
-    threshold_type             = "PERCENTAGE"
-    notification_type          = "FORECASTED"
-    subscriber_email_addresses = []
+  dynamic "notification" {
+    for_each = var.budget_alert_email == "" ? [] : [var.budget_alert_email]
+
+    content {
+      comparison_operator        = "GREATER_THAN"
+      threshold                  = 80
+      threshold_type             = "PERCENTAGE"
+      notification_type          = "FORECASTED"
+      subscriber_email_addresses = [notification.value]
+    }
   }
 }

@@ -74,13 +74,34 @@ jobs:
             -backend-config="bucket=${STATE_BUCKET}" \
             -backend-config="key=foundation/terraform.tfstate" \
             -backend-config="region=${AWS_REGION}"
+      - name: Recover interrupted foundation resources
+        working-directory: infra/foundation
+        env:
+          TF_VAR_aws_region: ${{ vars.AWS_REGION }}
+          TF_VAR_project_name: ${{ vars.PROJECT_NAME }}
+          TF_VAR_github_repository: repo:${{ github.repository_owner }}@${{ github.repository_owner_id }}/${{ github.event.repository.name }}@${{ github.repository_id }}
+          TF_VAR_budget_limit_usd: ${{ vars.BUDGET_LIMIT_USD }}
+          TF_VAR_budget_alert_email: ${{ vars.BUDGET_ALERT_EMAIL }}
+          TF_VAR_budget_alert_email: ${{ vars.BUDGET_ALERT_EMAIL }}
+        run: |
+          set -euo pipefail
+          vpc_id="$(aws ec2 describe-vpcs \
+            --filters "Name=tag:Project,Values=${PROJECT_NAME}" "Name=tag:Lifecycle,Values=persistent" \
+            --query 'Vpcs[0].VpcId' --output text)"
+          public_one="$(aws ec2 describe-subnets \
+            --filters "Name=vpc-id,Values=${vpc_id}" "Name=cidr-block,Values=10.40.16.0/20" \
+            --query 'Subnets[0].SubnetId' --output text)"
+          if ! terraform state list | grep -Fxq 'aws_subnet.public[1]'; then
+            terraform import 'aws_subnet.public[1]' "$public_one"
+          fi
       - name: Terraform plan
         working-directory: infra/foundation
         env:
           TF_VAR_aws_region: ${{ vars.AWS_REGION }}
           TF_VAR_project_name: ${{ vars.PROJECT_NAME }}
-          TF_VAR_github_repository: ${{ github.repository }}
+          TF_VAR_github_repository: repo:${{ github.repository_owner }}@${{ github.repository_owner_id }}/${{ github.event.repository.name }}@${{ github.repository_id }}
           TF_VAR_budget_limit_usd: ${{ vars.BUDGET_LIMIT_USD }}
+          TF_VAR_budget_alert_email: ${{ vars.BUDGET_ALERT_EMAIL }}
         run: terraform plan -input=false -out tfplan
       - uses: actions/upload-artifact@v4
         with:
@@ -115,6 +136,7 @@ jobs:
         env:
           TF_VAR_aws_region: ${{ vars.AWS_REGION }}
           TF_VAR_project_name: ${{ vars.PROJECT_NAME }}
-          TF_VAR_github_repository: ${{ github.repository }}
+          TF_VAR_github_repository: repo:${{ github.repository_owner }}@${{ github.repository_owner_id }}/${{ github.event.repository.name }}@${{ github.repository_id }}
           TF_VAR_budget_limit_usd: ${{ vars.BUDGET_LIMIT_USD }}
+          TF_VAR_budget_alert_email: ${{ vars.BUDGET_ALERT_EMAIL }}
         run: terraform apply -input=false tfplan

@@ -25,6 +25,44 @@ resource "aws_route" "private_nat" {
   nat_gateway_id         = aws_nat_gateway.session.id
 }
 
+resource "aws_security_group" "endpoint" {
+  name        = "${var.project_name}-${var.session_id}-endpoints"
+  description = "Session-scoped ECR interface endpoint access."
+  vpc_id      = data.terraform_remote_state.foundation.outputs.vpc_id
+
+  ingress {
+    protocol    = "tcp"
+    from_port   = 443
+    to_port     = 443
+    cidr_blocks = [data.terraform_remote_state.foundation.outputs.vpc_cidr]
+  }
+
+  egress {
+    protocol    = "-1"
+    from_port   = 0
+    to_port     = 0
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+resource "aws_vpc_endpoint" "ecr_api" {
+  vpc_id              = data.terraform_remote_state.foundation.outputs.vpc_id
+  service_name        = "com.amazonaws.${var.aws_region}.ecr.api"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = data.terraform_remote_state.foundation.outputs.private_subnet_ids
+  security_group_ids  = [aws_security_group.endpoint.id]
+  private_dns_enabled = true
+}
+
+resource "aws_vpc_endpoint" "ecr_dkr" {
+  vpc_id              = data.terraform_remote_state.foundation.outputs.vpc_id
+  service_name        = "com.amazonaws.${var.aws_region}.ecr.dkr"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = data.terraform_remote_state.foundation.outputs.private_subnet_ids
+  security_group_ids  = [aws_security_group.endpoint.id]
+  private_dns_enabled = true
+}
+
 resource "aws_iam_role" "cluster" {
   name = "${var.project_name}-${var.session_id}-cluster"
 
@@ -91,7 +129,11 @@ resource "aws_eks_cluster" "session" {
     authentication_mode = "API_AND_CONFIG_MAP"
   }
 
-  depends_on = [aws_iam_role_policy_attachment.cluster]
+  depends_on = [
+    aws_iam_role_policy_attachment.cluster,
+    aws_vpc_endpoint.ecr_api,
+    aws_vpc_endpoint.ecr_dkr
+  ]
 }
 
 resource "aws_eks_access_entry" "github" {

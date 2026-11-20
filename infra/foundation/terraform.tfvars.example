@@ -1,4 +1,4 @@
 aws_region       = "us-east-1"
 project_name     = "llm-sessions"
-github_repository = "OWNER/ephemeral-llm-eks-platform"
+github_repository = "giggenie@191191779/ephemeral-llm-eks-platform@1465473915"
 budget_limit_usd = 100
