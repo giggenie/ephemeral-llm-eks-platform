@@ -79,26 +79,54 @@ jobs:
         env:
           TF_VAR_aws_region: ${{ vars.AWS_REGION }}
           TF_VAR_project_name: ${{ vars.PROJECT_NAME }}
-          TF_VAR_github_repository: repo:${{ github.repository_owner }}@${{ github.repository_owner_id }}/${{ github.event.repository.name }}@${{ github.repository_id }}
+          TF_VAR_github_repository: ${{ github.repository_owner }}@${{ github.repository_owner_id }}/${{ github.event.repository.name }}@${{ github.repository_id }}
           TF_VAR_budget_limit_usd: ${{ vars.BUDGET_LIMIT_USD }}
           TF_VAR_budget_alert_email: ${{ vars.BUDGET_ALERT_EMAIL }}
         run: |
           set -euo pipefail
-          vpc_id="$(aws ec2 describe-vpcs \
+          read -ra vpc_ids <<< "$(aws ec2 describe-vpcs \
             --filters "Name=tag:Project,Values=${PROJECT_NAME}" "Name=tag:Lifecycle,Values=persistent" \
-            --query 'Vpcs[0].VpcId' --output text)"
-          public_one="$(aws ec2 describe-subnets \
-            --filters "Name=vpc-id,Values=${vpc_id}" "Name=cidr-block,Values=10.40.16.0/20" \
-            --query 'Subnets[0].SubnetId' --output text)"
-          if ! terraform state list | grep -Fxq 'aws_subnet.public[1]'; then
-            terraform import 'aws_subnet.public[1]' "$public_one"
+            --query 'Vpcs[].VpcId' --output text)"
+          if ((${#vpc_ids[@]} > 1)); then
+            echo "Expected at most one persistent project VPC, found ${#vpc_ids[@]}." >&2
+            exit 1
+          fi
+          if ((${#vpc_ids[@]} == 1)); then
+            vpc_id="${vpc_ids[0]}"
+            public_one="$(aws ec2 describe-subnets \
+              --filters "Name=vpc-id,Values=${vpc_id}" "Name=tag:kubernetes.io/role/elb,Values=1" \
+              --query 'sort_by(Subnets,&AvailabilityZone)[1].SubnetId' --output text)"
+            if [[ "$public_one" != "None" && -n "$public_one" ]] && ! terraform state list | grep -Fxq 'aws_subnet.public[1]'; then
+              terraform import 'aws_subnet.public[1]' "$public_one"
+            fi
+            for service in ecr.api ecr.dkr; do
+              endpoint_ids="$(aws ec2 describe-vpc-endpoints \
+                --filters "Name=vpc-id,Values=${vpc_id}" "Name=service-name,Values=com.amazonaws.${AWS_REGION}.${service}" \
+                --query 'VpcEndpoints[].VpcEndpointId' --output text)"
+              if [[ -n "$endpoint_ids" && "$endpoint_ids" != "None" ]]; then
+                for endpoint_id in $endpoint_ids; do
+                  aws ec2 delete-vpc-endpoints --vpc-endpoint-ids "$endpoint_id"
+                done
+                for attempt in {1..30}; do
+                  remaining="$(aws ec2 describe-vpc-endpoints \
+                    --filters "Name=vpc-id,Values=${vpc_id}" "Name=service-name,Values=com.amazonaws.${AWS_REGION}.${service}" \
+                    --query 'VpcEndpoints[?State!=`deleted`].VpcEndpointId' --output text)"
+                  [[ -z "$remaining" || "$remaining" == "None" ]] && break
+                  sleep 5
+                done
+                if [[ -n "$remaining" && "$remaining" != "None" ]]; then
+                  echo "ECR endpoint deletion did not complete: $remaining" >&2
+                  exit 1
+                fi
+              fi
+            done
           fi
       - name: Terraform plan
         working-directory: infra/foundation
         env:
           TF_VAR_aws_region: ${{ vars.AWS_REGION }}
           TF_VAR_project_name: ${{ vars.PROJECT_NAME }}
-          TF_VAR_github_repository: repo:${{ github.repository_owner }}@${{ github.repository_owner_id }}/${{ github.event.repository.name }}@${{ github.repository_id }}
+          TF_VAR_github_repository: ${{ github.repository_owner }}@${{ github.repository_owner_id }}/${{ github.event.repository.name }}@${{ github.repository_id }}
           TF_VAR_budget_limit_usd: ${{ vars.BUDGET_LIMIT_USD }}
           TF_VAR_budget_alert_email: ${{ vars.BUDGET_ALERT_EMAIL }}
         run: terraform plan -input=false -out tfplan
@@ -135,7 +163,7 @@ jobs:
         env:
           TF_VAR_aws_region: ${{ vars.AWS_REGION }}
           TF_VAR_project_name: ${{ vars.PROJECT_NAME }}
-          TF_VAR_github_repository: repo:${{ github.repository_owner }}@${{ github.repository_owner_id }}/${{ github.event.repository.name }}@${{ github.repository_id }}
+          TF_VAR_github_repository: ${{ github.repository_owner }}@${{ github.repository_owner_id }}/${{ github.event.repository.name }}@${{ github.repository_id }}
           TF_VAR_budget_limit_usd: ${{ vars.BUDGET_LIMIT_USD }}
           TF_VAR_budget_alert_email: ${{ vars.BUDGET_ALERT_EMAIL }}
         run: terraform apply -input=false tfplan

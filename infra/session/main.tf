@@ -19,10 +19,41 @@ resource "aws_nat_gateway" "session" {
   subnet_id     = data.terraform_remote_state.foundation.outputs.public_subnet_ids[0]
 }
 
+resource "aws_route_table" "private" {
+  for_each = {
+    for subnet_id in data.terraform_remote_state.foundation.outputs.private_subnet_ids :
+    subnet_id => subnet_id
+  }
+
+  vpc_id = data.terraform_remote_state.foundation.outputs.vpc_id
+
+  tags = {
+    Project   = var.project_name
+    SessionId = var.session_id
+    Lifecycle = "session"
+  }
+}
+
+resource "aws_route_table_association" "private" {
+  for_each = aws_route_table.private
+
+  route_table_id = each.value.id
+  subnet_id      = each.key
+}
+
 resource "aws_route" "private_nat" {
-  route_table_id         = data.terraform_remote_state.foundation.outputs.private_route_table_id
+  for_each = aws_route_table.private
+
+  route_table_id         = each.value.id
   destination_cidr_block = "0.0.0.0/0"
   nat_gateway_id         = aws_nat_gateway.session.id
+}
+
+resource "aws_vpc_endpoint_route_table_association" "s3" {
+  for_each = aws_route_table.private
+
+  route_table_id  = each.value.id
+  vpc_endpoint_id = data.terraform_remote_state.foundation.outputs.s3_vpc_endpoint_id
 }
 
 resource "aws_security_group" "endpoint" {
@@ -159,7 +190,10 @@ resource "aws_eks_node_group" "system" {
   depends_on = [
     aws_iam_role_policy_attachment.system_nodes_worker,
     aws_iam_role_policy_attachment.system_nodes_cni,
-    aws_iam_role_policy_attachment.system_nodes_ecr
+    aws_iam_role_policy_attachment.system_nodes_ecr,
+    aws_route_table_association.private,
+    aws_route.private_nat,
+    aws_vpc_endpoint_route_table_association.s3
   ]
 }
 

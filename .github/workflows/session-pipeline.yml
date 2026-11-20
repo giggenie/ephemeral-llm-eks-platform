@@ -17,7 +17,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: llm-session-pipeline
+  group: llm-session-lifecycle
   cancel-in-progress: false
 
 jobs:

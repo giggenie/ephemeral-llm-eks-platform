@@ -62,12 +62,6 @@ resource "aws_route_table" "private" {
   vpc_id = aws_vpc.main.id
 }
 
-resource "aws_route_table_association" "private" {
-  count          = 2
-  route_table_id = aws_route_table.private.id
-  subnet_id      = aws_subnet.private[count.index].id
-}
-
 resource "aws_vpc_endpoint" "s3" {
   vpc_id            = aws_vpc.main.id
   service_name      = "com.amazonaws.${var.aws_region}.s3"
@@ -194,34 +188,60 @@ resource "aws_iam_role" "github_terraform" {
 }
 
 resource "aws_iam_role_policy" "github_terraform" {
-  for_each = aws_iam_role.github_terraform
+  for_each = toset(["plan", "apply", "destroy"])
 
-  role = each.value.id
+  role = aws_iam_role.github_terraform[each.key].id
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
       Effect = "Allow"
-      Action = [
+      Action = each.key == "plan" ? [
+        "acm:Describe*",
+        "acm:List*",
+        "budgets:ViewBudget",
+        "cloudwatch:Describe*",
+        "cloudwatch:Get*",
+        "cloudwatch:List*",
+        "ec2:Describe*",
+        "ecr:Describe*",
+        "ecr:Get*",
+        "ecr:List*",
+        "eks:Describe*",
+        "eks:List*",
+        "elasticloadbalancing:Describe*",
+        "iam:Get*",
+        "iam:List*",
+        "logs:Describe*",
+        "logs:Get*",
+        "logs:List*",
+        "route53:Get*",
+        "route53:List*",
+        "s3:Get*",
+        "s3:List*",
+        "ssm:Describe*",
+        "ssm:Get*",
+        "sts:GetCallerIdentity"
+        ] : [
+        "acm:*",
+        "budgets:*",
+        "cloudwatch:*",
         "ec2:*",
-        "eks:*",
         "ecr:*",
-        "s3:*",
+        "eks:*",
+        "elasticloadbalancing:*",
+        "iam:CreateRole",
+        "iam:CreateServiceLinkedRole",
+        "iam:DeleteRole",
+        "iam:DeleteRolePolicy",
         "iam:Get*",
         "iam:List*",
         "iam:PassRole",
-        "iam:CreateRole",
-        "iam:DeleteRole",
         "iam:PutRolePolicy",
-        "iam:DeleteRolePolicy",
         "iam:TagRole",
-        "iam:CreateServiceLinkedRole",
-        "elasticloadbalancing:*",
-        "route53:*",
-        "acm:*",
-        "budgets:*",
-        "cloudwatch:PutMetricData",
         "logs:*",
+        "route53:*",
+        "s3:*",
         "ssm:*"
       ]
       Resource = "*"

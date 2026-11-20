@@ -17,17 +17,24 @@ permissions:
   id-token: write
 
 concurrency:
-  group: llm-session-destroy-${{ inputs.session_id }}
+  group: llm-session-lifecycle
   cancel-in-progress: false
 
 jobs:
   destroy:
-    if: inputs.confirmation == format('DESTROY-{0}', inputs.session_id)
     runs-on: ubuntu-latest
     environment: destroy
     steps:
       - uses: actions/checkout@v4
       - uses: hashicorp/setup-terraform@v3
+      - name: Validate destruction target
+        env:
+          SESSION_ID: ${{ inputs.session_id }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+          [[ "$SESSION_ID" =~ ^[a-z0-9][a-z0-9-]{0,30}$ ]]
+          [[ "$CONFIRMATION" == "DESTROY-$SESSION_ID" ]]
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-region: ${{ vars.AWS_REGION }}
@@ -59,4 +66,6 @@ jobs:
           test -z "$(aws eks list-clusters --query "clusters[?contains(@, '${SESSION_ID}')]" --output text)"
           test -z "$(aws ec2 describe-instances --filters "Name=tag:SessionId,Values=${SESSION_ID}" "Name=instance-state-name,Values=pending,running,stopping,stopped" --query 'Reservations[].Instances[].InstanceId' --output text)"
           test -z "$(aws ec2 describe-nat-gateways --filter "Name=tag:SessionId,Values=${SESSION_ID}" "Name=state,Values=available,pending,deleting" --query 'NatGateways[].NatGatewayId' --output text)"
-          echo "No tagged EKS, EC2, or NAT resources remain."
+          test -z "$(aws ec2 describe-vpc-endpoints --filters "Name=tag:SessionId,Values=${SESSION_ID}" "Name=state,Values=available,pending,deleting" --query 'VpcEndpoints[].VpcEndpointId' --output text)"
+          test -z "$(aws ec2 describe-addresses --filters "Name=tag:SessionId,Values=${SESSION_ID}" --query 'Addresses[].AllocationId' --output text)"
+          echo "No tagged session resources remain."
