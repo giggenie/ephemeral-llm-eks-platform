@@ -13,3 +13,7 @@ output "artifacts_bucket" {
 output "ecr_repository_url" {
   value = data.terraform_remote_state.foundation.outputs.ecr_repository_url
 }
+
+output "model_role_arn" {
+  value = aws_iam_role.model.arn
+}

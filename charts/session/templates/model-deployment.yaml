@@ -26,12 +26,27 @@ spec:
           operator: Equal
           value: gpu
           effect: NoSchedule
+      {{- if .Values.model.artifactUri }}
+      initContainers:
+        - name: hydrate-model
+          image: {{ .Values.model.artifactImage | quote }}
+          command: ["/bin/sh", "-ec"]
+          args:
+            - |
+              mkdir -p /models
+              aws s3 cp {{ .Values.model.artifactUri | quote }} /tmp/model.tar.gz
+              echo "{{ .Values.model.sha256 }}  /tmp/model.tar.gz" | sha256sum -c -
+              tar -xzf /tmp/model.tar.gz -C /models
+          volumeMounts:
+            - name: model-storage
+              mountPath: /models
+      {{- end }}
       containers:
         - name: model
           image: {{ .Values.model.image | quote }}
           args:
             - "--model"
-            - {{ .Values.model.name | quote }}
+            - {{ if .Values.model.artifactUri }}/models{{ else }}{{ .Values.model.name | quote }}{{ end }}
             - "--max-model-len"
             - {{ .Values.model.maxModelLen | quote }}
           ports:
@@ -49,6 +64,12 @@ spec:
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
+      {{- if .Values.model.artifactUri }}
+      volumes:
+        - name: model-storage
+          emptyDir:
+            sizeLimit: 200Gi
+      {{- end }}
       terminationGracePeriodSeconds: 60
 ---
 apiVersion: v1

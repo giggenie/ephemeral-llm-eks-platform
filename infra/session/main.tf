@@ -242,3 +242,7 @@ resource "kubernetes_namespace" "session" {
 
   depends_on = [helm_release.argocd]
 }
+
+locals {
+  model_artifact_bucket = var.model_artifact_bucket != "" ? var.model_artifact_bucket : data.terraform_remote_state.foundation.outputs.artifacts_bucket
+}

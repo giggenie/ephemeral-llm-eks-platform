@@ -16,7 +16,18 @@ foundation run. Configure these GitHub repository or environment variables:
 - `AWS_PLAN_ROLE_ARN`
 - `AWS_APPLY_ROLE_ARN`
 - `AWS_DESTROY_ROLE_ARN`
+- `AWS_BOOTSTRAP_ROLE_ARN` (pre-existing GitHub OIDC role used only to bootstrap the foundation)
+- `BUDGET_LIMIT_USD`
 - `EKS_PUBLIC_ACCESS_CIDRS` (a restricted JSON list; never `0.0.0.0/0`)
+- `MODEL_ARTIFACT_BUCKET`
+- `MODEL_ARTIFACT_KEY`
+- `MODEL_ARTIFACT_SHA256` (64-character SHA-256 checksum)
+- `INGRESS_HOSTNAME`
+- `ACM_CERTIFICATE_ARN`
+
+Add the `GATEWAY_HTPASSWD` value as a masked `apply` environment secret. It
+must contain an nginx `htpasswd` line, for example generated with
+`htpasswd -nbB operator '<password>'`.
 
 The GitHub repository value passed to `infra\foundation` must match the exact
 `OWNER/ephemeral-llm-eks-platform` used by the OIDC trust policy. The intended
@@ -34,15 +45,25 @@ self-hosted runner inside the VPC.
 
 1. Copy `infra\foundation\terraform.tfvars.example` to a local or protected
    CI variable set and set the real repository and region.
-2. Run the persistent foundation through the protected Terraform apply workflow.
-3. Store the foundation state bucket name in `FOUNDATION_STATE_BUCKET`.
-4. Review the Terraform plan for the ephemeral session.
-5. Run **Start EKS session** with a lowercase session ID and an expiry no more
+2. Configure `AWS_BOOTSTRAP_ROLE_ARN` for the protected `bootstrap` and
+   `foundation-apply` environments. This role must already trust this
+   repository through GitHub OIDC and have permission to create the foundation.
+3. Run **Apply persistent foundation** from GitHub Actions. It creates or
+   secures the state bucket, plans the foundation, and applies only the
+   reviewed plan after `foundation-apply` approval.
+4. Store the foundation state bucket name in `FOUNDATION_STATE_BUCKET`.
+5. Review the Terraform plan for the ephemeral session.
+6. Run **Start EKS session** with a lowercase session ID and an expiry no more
    than eight hours in the future.
-6. Run **Warm EKS session** to bootstrap Argo CD and activate the model.
-7. Run **Verify EKS session** for the bounded validation task.
-8. Run **Destroy EKS session** with `DESTROY-<session_id>`.
-9. Run **Check EKS session leaks** if teardown reports an error.
+7. Run **Warm EKS session** to bootstrap Argo CD and activate the model.
+8. Run **Verify EKS session** for the bounded validation task.
+9. Run **Destroy EKS session** with `DESTROY-<session_id>`.
+10. Run **Check EKS session leaks** if teardown reports an error.
+
+Run **EKS session pipeline** manually when infrastructure is needed. It runs
+ordered plan, apply, warm-up, and verification jobs, then leaves the session
+running. Run **Destroy EKS session** separately when finished; configure required
+reviewers on both `apply` and `destroy`.
 
 The destroy workflow is protected and targets only the session state key. It
 must never be used against the foundation state.
