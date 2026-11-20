@@ -194,9 +194,9 @@ resource "aws_iam_role" "github_terraform" {
 }
 
 resource "aws_iam_role_policy" "github_terraform" {
-  for_each = aws_iam_role.github_terraform
+  for_each = toset(["plan", "apply", "destroy"])
 
-  role = each.value.id
+  role = aws_iam_role.github_terraform[each.key].id
 
   policy = jsonencode({
     Version = "2012-10-17"
