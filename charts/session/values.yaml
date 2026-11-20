@@ -2,6 +2,9 @@ session:
   namespace: llm-session
   expiresAt: ""
 
+serviceAccount:
+  roleArn: ""
+
 image:
   repository: ""
   tag: ""
@@ -14,6 +17,7 @@ model:
   name: ""
   artifactUri: ""
   sha256: ""
+  artifactImage: amazon/aws-cli:2.22.35
   maxModelLen: 8192
   gpu:
     instanceTypes:
@@ -25,6 +29,7 @@ gateway:
   image: nginx:1.27-alpine
   servicePort: 8080
   authSecretName: llm-session-auth
+  authEnabled: true
 
 ingress:
   enabled: true

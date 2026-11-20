@@ -1,0 +1,120 @@
+name: Apply persistent foundation
+
+on:
+  workflow_dispatch:
+    inputs:
+      state_bucket:
+        description: "Globally unique Terraform state bucket"
+        required: true
+        type: string
+        default: ephemeral-llm-state-060795928170-us-east-1
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: foundation-apply
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  PROJECT_NAME: ${{ vars.PROJECT_NAME }}
+  GITHUB_REPOSITORY_NAME: ${{ github.repository }}
+  BUDGET_LIMIT_USD: ${{ vars.BUDGET_LIMIT_USD }}
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    environment: bootstrap
+    outputs:
+      state_bucket: ${{ steps.context.outputs.state_bucket }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ vars.AWS_REGION }}
+          role-to-assume: ${{ vars.AWS_BOOTSTRAP_ROLE_ARN }}
+      - name: Configure foundation context
+        id: context
+        env:
+          INPUT_STATE_BUCKET: ${{ inputs.state_bucket }}
+        run: |
+          test -n "$AWS_REGION"
+          test -n "$PROJECT_NAME"
+          test -n "$BUDGET_LIMIT_USD"
+          state_bucket="$INPUT_STATE_BUCKET"
+          [[ "$state_bucket" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]]
+          echo "state_bucket=${state_bucket}" >> "$GITHUB_OUTPUT"
+      - name: Ensure encrypted state bucket
+        env:
+          STATE_BUCKET: ${{ steps.context.outputs.state_bucket }}
+        run: |
+          if ! aws s3api head-bucket --bucket "$STATE_BUCKET" 2>/dev/null; then
+            aws s3api create-bucket --bucket "$STATE_BUCKET" --region "$AWS_REGION"
+          fi
+          aws s3api put-bucket-versioning \
+            --bucket "$STATE_BUCKET" \
+            --versioning-configuration Status=Enabled
+          aws s3api put-bucket-encryption \
+            --bucket "$STATE_BUCKET" \
+            --server-side-encryption-configuration \
+            '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}'
+          aws s3api put-public-access-block \
+            --bucket "$STATE_BUCKET" \
+            --public-access-block-configuration \
+            BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
+      - name: Terraform init
+        working-directory: infra/foundation
+        env:
+          STATE_BUCKET: ${{ steps.context.outputs.state_bucket }}
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=${STATE_BUCKET}" \
+            -backend-config="key=foundation/terraform.tfstate" \
+            -backend-config="region=${AWS_REGION}"
+      - name: Terraform plan
+        working-directory: infra/foundation
+        env:
+          TF_VAR_aws_region: ${{ vars.AWS_REGION }}
+          TF_VAR_project_name: ${{ vars.PROJECT_NAME }}
+          TF_VAR_github_repository: ${{ github.repository }}
+          TF_VAR_budget_limit_usd: ${{ vars.BUDGET_LIMIT_USD }}
+        run: terraform plan -input=false -out tfplan
+      - uses: actions/upload-artifact@v4
+        with:
+          name: foundation-plan-${{ github.run_id }}
+          path: infra/foundation/tfplan
+          retention-days: 1
+
+  apply:
+    needs: plan
+    runs-on: ubuntu-latest
+    environment: foundation-apply
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - uses: actions/download-artifact@v4
+        with:
+          name: foundation-plan-${{ github.run_id }}
+          path: infra/foundation
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ vars.AWS_REGION }}
+          role-to-assume: ${{ vars.AWS_BOOTSTRAP_ROLE_ARN }}
+      - name: Terraform init
+        working-directory: infra/foundation
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=${{ needs.plan.outputs.state_bucket }}" \
+            -backend-config="key=foundation/terraform.tfstate" \
+            -backend-config="region=${AWS_REGION}"
+      - name: Apply reviewed foundation plan
+        working-directory: infra/foundation
+        env:
+          TF_VAR_aws_region: ${{ vars.AWS_REGION }}
+          TF_VAR_project_name: ${{ vars.PROJECT_NAME }}
+          TF_VAR_github_repository: ${{ github.repository }}
+          TF_VAR_budget_limit_usd: ${{ vars.BUDGET_LIMIT_USD }}
+        run: terraform apply -input=false tfplan

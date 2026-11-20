@@ -51,3 +51,29 @@ variable "eks_public_access_cidrs" {
     error_message = "Provide at least one restricted EKS API CIDR; 0.0.0.0/0 is prohibited."
   }
 }
+
+variable "model_artifact_bucket" {
+  type        = string
+  default     = ""
+  description = "S3 bucket containing the versioned model archive. Defaults to the foundation artifacts bucket."
+}
+
+variable "model_artifact_key" {
+  type        = string
+  description = "S3 object key for the immutable model archive."
+
+  validation {
+    condition     = length(var.model_artifact_key) > 0 && !contains(split("/", var.model_artifact_key), "..")
+    error_message = "model_artifact_key must be a non-empty relative S3 object key."
+  }
+}
+
+variable "model_artifact_sha256" {
+  type        = string
+  description = "SHA-256 checksum of the model archive."
+
+  validation {
+    condition     = can(regex("^[a-fA-F0-9]{64}$", var.model_artifact_sha256))
+    error_message = "model_artifact_sha256 must be a 64-character hexadecimal SHA-256 checksum."
+  }
+}

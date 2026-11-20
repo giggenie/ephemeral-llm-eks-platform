@@ -1,0 +1,224 @@
+name: EKS session pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      session_id:
+        description: "Lowercase session identifier"
+        required: false
+        type: string
+      model_name:
+        description: "Exact model identifier"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: llm-session-pipeline
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    environment: plan
+    outputs:
+      session_id: ${{ steps.context.outputs.session_id }}
+      model_name: ${{ steps.context.outputs.model_name }}
+      expires_at: ${{ steps.context.outputs.expires_at }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - name: Set session context
+        id: context
+        env:
+          INPUT_SESSION_ID: ${{ inputs.session_id }}
+          INPUT_MODEL_NAME: ${{ inputs.model_name }}
+          MODEL_ARTIFACT_BUCKET: ${{ vars.MODEL_ARTIFACT_BUCKET }}
+          MODEL_ARTIFACT_KEY: ${{ vars.MODEL_ARTIFACT_KEY }}
+          MODEL_ARTIFACT_SHA256: ${{ vars.MODEL_ARTIFACT_SHA256 }}
+          INGRESS_HOSTNAME: ${{ vars.INGRESS_HOSTNAME }}
+          ACM_CERTIFICATE_ARN: ${{ vars.ACM_CERTIFICATE_ARN }}
+          MODEL_NAME: ${{ vars.MODEL_NAME }}
+        run: |
+          session_id="${INPUT_SESSION_ID:-push-${GITHUB_RUN_ID}}"
+          model_name="${INPUT_MODEL_NAME:-${MODEL_NAME:-test-model}}"
+          expires_at="$(date -u -d '+8 hours' '+%Y-%m-%dT%H:%M:%SZ')"
+          [[ "$session_id" =~ ^[a-z0-9][a-z0-9-]{0,30}$ ]]
+          [[ "$model_name" != *$'\n'* ]]
+          [[ "$INGRESS_HOSTNAME" =~ ^[A-Za-z0-9.-]+$ ]]
+          test -n "$MODEL_ARTIFACT_BUCKET"
+          test -n "$MODEL_ARTIFACT_KEY"
+          [[ "$MODEL_ARTIFACT_SHA256" =~ ^[a-fA-F0-9]{64}$ ]]
+          test -n "$INGRESS_HOSTNAME"
+          [[ "$ACM_CERTIFICATE_ARN" =~ ^arn:aws:acm:[a-z0-9-]+:[0-9]{12}:certificate/[a-f0-9-]+$ ]]
+          echo "session_id=${session_id}" >> "$GITHUB_OUTPUT"
+          echo "model_name=${model_name}" >> "$GITHUB_OUTPUT"
+          echo "expires_at=${expires_at}" >> "$GITHUB_OUTPUT"
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ vars.AWS_REGION }}
+          role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
+      - name: Verify model artifact
+        run: aws s3api head-object --bucket "${{ vars.MODEL_ARTIFACT_BUCKET }}" --key "${{ vars.MODEL_ARTIFACT_KEY }}"
+      - name: Terraform init
+        working-directory: infra/session
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ vars.FOUNDATION_STATE_BUCKET }}" \
+            -backend-config="key=sessions/${{ steps.context.outputs.session_id }}/terraform.tfstate" \
+            -backend-config="region=${{ vars.AWS_REGION }}"
+      - name: Terraform plan
+        working-directory: infra/session
+        env:
+          TF_VAR_aws_region: ${{ vars.AWS_REGION }}
+          TF_VAR_project_name: ${{ vars.PROJECT_NAME }}
+          TF_VAR_session_id: ${{ steps.context.outputs.session_id }}
+          TF_VAR_expires_at: ${{ steps.context.outputs.expires_at }}
+          TF_VAR_foundation_state_bucket: ${{ vars.FOUNDATION_STATE_BUCKET }}
+          TF_VAR_foundation_state_key: foundation/terraform.tfstate
+          TF_VAR_eks_public_access_cidrs: ${{ vars.EKS_PUBLIC_ACCESS_CIDRS }}
+          TF_VAR_model_artifact_bucket: ${{ vars.MODEL_ARTIFACT_BUCKET }}
+          TF_VAR_model_artifact_key: ${{ vars.MODEL_ARTIFACT_KEY }}
+          TF_VAR_model_artifact_sha256: ${{ vars.MODEL_ARTIFACT_SHA256 }}
+        run: terraform plan -input=false -out=tfplan
+      - uses: actions/upload-artifact@v4
+        with:
+          name: session-plan-${{ github.run_id }}
+          path: infra/session/tfplan
+          retention-days: 1
+
+  apply:
+    needs: plan
+    runs-on: ubuntu-latest
+    environment: apply
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - uses: actions/download-artifact@v4
+        with:
+          name: session-plan-${{ github.run_id }}
+          path: infra/session
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ vars.AWS_REGION }}
+          role-to-assume: ${{ vars.AWS_APPLY_ROLE_ARN }}
+      - name: Terraform init
+        working-directory: infra/session
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ vars.FOUNDATION_STATE_BUCKET }}" \
+            -backend-config="key=sessions/${{ needs.plan.outputs.session_id }}/terraform.tfstate" \
+            -backend-config="region=${{ vars.AWS_REGION }}"
+      - name: Terraform apply
+        working-directory: infra/session
+        env:
+          TF_VAR_aws_region: ${{ vars.AWS_REGION }}
+          TF_VAR_project_name: ${{ vars.PROJECT_NAME }}
+          TF_VAR_session_id: ${{ needs.plan.outputs.session_id }}
+          TF_VAR_expires_at: ${{ needs.plan.outputs.expires_at }}
+          TF_VAR_foundation_state_bucket: ${{ vars.FOUNDATION_STATE_BUCKET }}
+          TF_VAR_foundation_state_key: foundation/terraform.tfstate
+          TF_VAR_eks_public_access_cidrs: ${{ vars.EKS_PUBLIC_ACCESS_CIDRS }}
+          TF_VAR_model_artifact_bucket: ${{ vars.MODEL_ARTIFACT_BUCKET }}
+          TF_VAR_model_artifact_key: ${{ vars.MODEL_ARTIFACT_KEY }}
+          TF_VAR_model_artifact_sha256: ${{ vars.MODEL_ARTIFACT_SHA256 }}
+        run: terraform apply -auto-approve -input=false tfplan
+
+  warm:
+    needs: [plan, apply]
+    runs-on: ubuntu-latest
+    environment: apply
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ vars.AWS_REGION }}
+          role-to-assume: ${{ vars.AWS_APPLY_ROLE_ARN }}
+      - name: Configure cluster access
+        run: aws eks update-kubeconfig --region "${{ vars.AWS_REGION }}" --name "${{ vars.PROJECT_NAME }}-${{ needs.plan.outputs.session_id }}"
+      - name: Wait for Argo CD
+        run: kubectl -n argocd rollout status deployment/argocd-server --timeout=10m
+      - name: Configure gateway authentication
+        env:
+          GATEWAY_HTPASSWD: ${{ secrets.GATEWAY_HTPASSWD }}
+        run: |
+          test -n "$GATEWAY_HTPASSWD"
+          kubectl -n llm-session create secret generic llm-session-auth \
+            --from-literal=htpasswd="$GATEWAY_HTPASSWD" \
+            --dry-run=client -o yaml | kubectl apply -f -
+      - name: Apply Argo application
+        run: kubectl apply -f argocd/project.yaml -f argocd/application.yaml
+      - name: Configure model
+        env:
+          MODEL_NAME: ${{ needs.plan.outputs.model_name }}
+          MODEL_ARTIFACT_BUCKET: ${{ vars.MODEL_ARTIFACT_BUCKET }}
+          MODEL_ARTIFACT_KEY: ${{ vars.MODEL_ARTIFACT_KEY }}
+          MODEL_ARTIFACT_SHA256: ${{ vars.MODEL_ARTIFACT_SHA256 }}
+          PROJECT_NAME: ${{ vars.PROJECT_NAME }}
+          SESSION_ID: ${{ needs.plan.outputs.session_id }}
+          INGRESS_HOSTNAME: ${{ vars.INGRESS_HOSTNAME }}
+          ACM_CERTIFICATE_ARN: ${{ vars.ACM_CERTIFICATE_ARN }}
+        run: |
+          model_role_arn="arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):role/${PROJECT_NAME}-${SESSION_ID}-model"
+          MODEL_ROLE_ARN="$model_role_arn" python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          def scalar(value):
+              return json.dumps(value)
+
+          values = "\n".join([
+              "session:",
+              "  namespace: llm-session",
+              "serviceAccount:",
+              f"  roleArn: {scalar(os.environ['MODEL_ROLE_ARN'])}",
+              "model:",
+              f"  name: {scalar(os.environ['MODEL_NAME'])}",
+              f"  artifactUri: {scalar('s3://' + os.environ['MODEL_ARTIFACT_BUCKET'] + '/' + os.environ['MODEL_ARTIFACT_KEY'])}",
+              f"  sha256: {scalar(os.environ['MODEL_ARTIFACT_SHA256'])}",
+              "gateway:",
+              "  authEnabled: true",
+              "ingress:",
+              f"  hostname: {scalar(os.environ['INGRESS_HOSTNAME'])}",
+              f"  certificateArn: {scalar(os.environ['ACM_CERTIFICATE_ARN'])}",
+              "",
+          ])
+          patch = {"spec": {"source": {"helm": {"values": values}}}}
+          Path("application-patch.json").write_text(json.dumps(patch), encoding="utf-8")
+          PY
+          kubectl -n argocd patch application llm-session --type merge --patch-file application-patch.json
+      - name: Wait for Argo application
+        run: kubectl -n argocd wait --for=jsonpath='{.status.sync.status}'=Synced application/llm-session --timeout=20m
+      - name: Scale model for warm-up
+        run: |
+          kubectl -n llm-session scale deployment/llm-session-llm-session-model --replicas=1
+          kubectl -n llm-session rollout status deployment/llm-session-llm-session-model --timeout=20m
+      - name: Verify model service
+        run: kubectl -n llm-session get pods,svc -o wide
+
+  verify:
+    needs: [plan, warm]
+    runs-on: ubuntu-latest
+    environment: apply
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ vars.AWS_REGION }}
+          role-to-assume: ${{ vars.AWS_APPLY_ROLE_ARN }}
+      - name: Configure cluster access
+        run: aws eks update-kubeconfig --region "${{ vars.AWS_REGION }}" --name "${{ vars.PROJECT_NAME }}-${{ needs.plan.outputs.session_id }}"
+      - name: Verify cluster and workloads
+        run: |
+          kubectl get nodes
+          kubectl -n argocd get applications
+          kubectl -n llm-session get deployments,pods
+      - name: Upload verification metric
+        run: |
+          aws cloudwatch put-metric-data \
+            --namespace "${{ vars.PROJECT_NAME }}" \
+            --metric-data "MetricName=SessionVerified,Value=1,Unit=Count"
+
