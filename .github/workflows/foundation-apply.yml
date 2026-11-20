@@ -82,7 +82,6 @@ jobs:
           TF_VAR_github_repository: repo:${{ github.repository_owner }}@${{ github.repository_owner_id }}/${{ github.event.repository.name }}@${{ github.repository_id }}
           TF_VAR_budget_limit_usd: ${{ vars.BUDGET_LIMIT_USD }}
           TF_VAR_budget_alert_email: ${{ vars.BUDGET_ALERT_EMAIL }}
-          TF_VAR_budget_alert_email: ${{ vars.BUDGET_ALERT_EMAIL }}
         run: |
           set -euo pipefail
           vpc_id="$(aws ec2 describe-vpcs \
