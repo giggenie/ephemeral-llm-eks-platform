@@ -12,7 +12,13 @@ variable "project_name" {
 
 variable "github_repository" {
   type        = string
-  description = "GitHub repository in owner/name form."
+  description = "GitHub OIDC subject repository identifier in owner@owner-id/name@repository-id form."
+}
+
+variable "budget_alert_email" {
+  type        = string
+  description = "Optional email address for the AWS budget forecast notification."
+  default     = ""
 }
 
 variable "budget_limit_usd" {
